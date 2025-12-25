@@ -1,0 +1,503 @@
+
+
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>人物通過カウンター（1分集計・Excel出力）</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --bg:#0b132b; --panel:#1c2541; --accent:#5bc0be; --text:#eaeaea; --warn:#ffcc00;
+      --ok:#44c767; --err:#ff6b6b;
+    }
+    body{ margin:0; font-family:system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--text); }
+    header{ padding:14px 18px; background:var(--panel); border-bottom:1px solid #2f3b66; }
+    header h1{ margin:0; font-size:18px; }
+    main{ display:grid; grid-template-columns: 1fr 380px; gap:14px; padding:14px; }
+    .stage{ position:relative; border:1px solid #2f3b66; border-radius:8px; overflow:hidden; background:#000; min-height:420px; }
+    video, canvas{ position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; }
+    .panel{ background:var(--panel); border:1px solid #2f3b66; border-radius:8px; padding:12px; }
+    .controls button, .controls input[type=range] { margin:6px 6px 6px 0; }
+    button{ background:var(--accent); color:#012a36; border:none; border-radius:6px; padding:10px 12px; font-weight:600; cursor:pointer; }
+    button.secondary{ background:#3a506b; color:#d6eaff; }
+    button.warn{ background:var(--warn); }
+    button.ok{ background:var(--ok); }
+    button.err{ background:var(--err); }
+    button:disabled{ filter:grayscale(.6); opacity:.6; cursor:not-allowed; }
+    .stat{ display:flex; gap:10px; align-items:center; margin:8px 0; }
+    .stat .badge{ padding:6px 10px; border-radius:20px; font-weight:700; }
+    .badge.right{ background:#d1f7ff; color:#004b55; }
+    .badge.left{ background:#ffe0e6; color:#6b0016; }
+    .badge.total{ background:#e7f9e7; color:#004913; }
+    .grid{ width:100%; border-collapse:collapse; font-size:13px; }
+    .grid th, .grid td{ border-bottom:1px solid #2f3b66; padding:6px 8px; text-align:right; }
+    .grid th{ text-align:left; background:#162447; position:sticky; top:0; }
+    .row-note{ font-size:12px; opacity:.85; }
+    .range-wrap{ display:flex; align-items:center; gap:10px; }
+    .range-wrap label{ width:8.5em; }
+    .hint{ font-size:12px; opacity:.8; }
+    .footer-note{ font-size:12px; opacity:.75; margin-top:8px; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>人物通過カウンター（右/左・1分集計・Excel出力）</h1>
+</header>
+
+<main>
+  <!-- 映像領域 -->
+  <section class="stage">
+    <video id="video" playsinline muted></video>
+    <canvas id="canvas"></canvas>
+  </section>
+
+  <!-- 操作/表示パネル -->
+  <aside class="panel">
+    <div class="controls">
+      <div>
+        <button id="btnStart" class="ok">カメラ開始</button>
+        <button id="btnPause" class="secondary" disabled>一時停止</button>
+        <button id="btnReset" class="warn" disabled>リセット</button>
+        <button id="btnStopExport" class="err" disabled>停止＆Excel出力</button>
+      </div>
+
+      <div class="range-wrap">
+        <label>検出感度（スコア）</label>
+        <input id="scoreThr" type="range" min="0.2" max="0.9" step="0.05" value="0.5">
+        <span id="scoreVal">0.50</span>
+      </div>
+      <div class="range-wrap">
+        <label>最小サイズ（画面比）</label>
+        <input id="minSize" type="range" min="0.01" max="0.5" step="0.01" value="0.05">
+        <span id="sizeVal">0.05</span>
+      </div>
+      <div class="range-wrap">
+        <label>基準線（横位置%）</label>
+        <input id="lineX" type="range" min="10" max="90" step="1" value="50">
+        <span id="lineVal">50%</span>
+      </div>
+    </div>
+
+    <div class="stat">
+      <span class="badge right">右から来た</span><span id="countRight">0</span>
+    </div>
+    <div class="stat">
+      <span class="badge left">左から来た</span><span id="countLeft">0</span>
+    </div>
+    <div class="stat">
+      <span class="badge total">合計</span><span id="countTotal">0</span>
+    </div>
+
+    <hr/>
+    <h3 style="margin:8px 0;">1分毎の集計</h3>
+    <table class="grid" id="tableAgg">
+      <thead><tr><th>分開始時刻</th><th>右から</th><th>左から</th><th>合計</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="footer-note">※ 「停止＆Excel出力」で上表を .xlsx として保存します</p>
+    <p class="hint">ヒント：屋外は逆光・暗所で検出精度が低下します。カメラを**やや広角**にして基準線を**通路中央**に合わせると安定します。</p>
+  </aside>
+</main>
+
+<!-- 依存ライブラリ（CDN） -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<script>
+/**
+ * 人物通過カウンター
+ * - COCO-SSDで person を検出
+ * - 簡易トラッキング（重心による最近傍割当）
+ * - 基準線を跨いだ方向で「右から来た / 左から来た」を加算
+ * - 1分毎に集計（差分）行を追加
+ * - SheetJSでExcel(.xlsx)出力
+ */
+
+const els = {
+  video: document.getElementById('video'),
+  canvas: document.getElementById('canvas'),
+  btnStart: document.getElementById('btnStart'),
+  btnPause: document.getElementById('btnPause'),
+  btnReset: document.getElementById('btnReset'),
+  btnStopExport: document.getElementById('btnStopExport'),
+  scoreThr: document.getElementById('scoreThr'),
+  scoreVal: document.getElementById('scoreVal'),
+  minSize: document.getElementById('minSize'),
+  sizeVal: document.getElementById('sizeVal'),
+  lineX: document.getElementById('lineX'),
+  lineVal: document.getElementById('lineVal'),
+  countRight: document.getElementById('countRight'),
+  countLeft: document.getElementById('countLeft'),
+  countTotal: document.getElementById('countTotal'),
+  tableAggBody: document.querySelector('#tableAgg tbody'),
+};
+
+let model = null;
+let stream = null;
+let running = false;
+let paused = false;
+
+// カウント
+let countRight = 0;
+let countLeft  = 0;
+
+// 1分集計
+let minuteTimer = null;
+let minuteStart = null;
+let lastSnapshot = { right:0, left:0 };
+const minuteRows = []; // [{ts, right, left, total}]
+
+// トラッキング
+let tracks = new Map(); // id -> {cx, cy, lastCx, lastSide, counted:boolean, missed:number, bbox:[x,y,w,h]}
+let nextTrackId = 1;
+const MAX_MISSED = 8;        // 見失い許容フレーム
+const ASSIGN_DIST = 80;      // 割当半径(px) 映像解像度に応じて調整
+
+// 設定（UI連動）
+const cfg = {
+  scoreThr: parseFloat(els.scoreThr.value),
+  minRatio: parseFloat(els.minSize.value),
+  lineX: parseInt(els.lineX.value, 10) // %
+};
+
+// UI反映
+function updateConfigFromUI(){
+  cfg.scoreThr = parseFloat(els.scoreThr.value);
+  cfg.minRatio = parseFloat(els.minSize.value);
+  cfg.lineX    = parseInt(els.lineX.value, 10);
+  els.scoreVal.textContent = cfg.scoreThr.toFixed(2);
+  els.sizeVal.textContent  = cfg.minRatio.toFixed(2);
+  els.lineVal.textContent  = cfg.lineX + '%';
+}
+['scoreThr','minSize','lineX'].forEach(id => {
+  els[id].addEventListener('input', updateConfigFromUI);
+});
+updateConfigFromUI();
+
+// カメラ開始
+els.btnStart.addEventListener('click', async () => {
+  try{
+    els.btnStart.disabled = true;
+    els.btnStart.textContent = '起動中…';
+    await initCamera();
+    await loadModel();
+    startLoop();
+    startMinuteAggregation();
+    running = true;
+    paused = false;
+    els.btnPause.disabled = false;
+    els.btnReset.disabled = false;
+    els.btnStopExport.disabled = false;
+    els.btnStart.textContent = '稼働中';
+  }catch(e){
+    console.error(e);
+    alert('カメラ/モデルの初期化に失敗しました：' + e.message);
+    els.btnStart.disabled = false;
+    els.btnStart.textContent = 'カメラ開始';
+  }
+});
+
+// 一時停止/再開
+els.btnPause.addEventListener('click', () => {
+  paused = !paused;
+  els.btnPause.textContent = paused ? '再開' : '一時停止';
+});
+
+// リセット（カウント・集計・トラック）
+els.btnReset.addEventListener('click', () => {
+  resetAll();
+});
+
+// 停止＆Excel出力
+els.btnStopExport.addEventListener('click', async () => {
+  try{
+    await stopAll();
+    exportExcel();
+  }catch(e){
+    console.error(e);
+    alert('停止/出力でエラー：' + e.message);
+  }
+});
+
+// カメラ初期化
+async function initCamera(){
+  // スマホは背面カメラ優先
+  const constraints = {
+    audio:false,
+    video:{
+      facingMode: { ideal:'environment' },
+      width: { ideal: 1280 },
+      height:{ ideal: 720 }
+    }
+  };
+  stream = await navigator.mediaDevices.getUserMedia(constraints);
+  els.video.srcObject = stream;
+  await els.video.play();
+
+  // キャンバスサイズを映像に合わせる
+  const {videoWidth:w, videoHeight:h} = els.video;
+  const scale = 1.0; // 必要なら 0.75 などに変更
+  els.canvas.width  = Math.floor(w * scale);
+  els.canvas.height = Math.floor(h * scale);
+}
+
+// モデルロード
+async function loadModel(){
+  model = await cocoSsd.load({ base:'lite_mobilenet_v2' }); // 軽量版
+}
+
+// メインループ
+function startLoop(){
+  const ctx = els.canvas.getContext('2d');
+  const draw = async () => {
+    if(!running){ return; }
+    requestAnimationFrame(draw);
+    if(paused){ drawOverlay(ctx); return; }
+
+    // 推論
+    const preds = await model.detect(els.video);
+    // 映像サイズ
+    const W = els.canvas.width, H = els.canvas.height;
+
+    // personのみ抽出＆スコア/サイズ閾
+    const people = preds.filter(p => p.class === 'person' && p.score >= cfg.scoreThr)
+                        .filter(p => {
+                          const [x,y,w,h] = p.bbox;
+                          return (w*h) >= cfg.minRatio * (W*H);
+                        });
+
+    // トラック更新
+    updateTracks(people);
+
+    // 描画
+    drawOverlay(ctx);
+  };
+  running = true;
+  requestAnimationFrame(draw);
+}
+
+// トラック更新・通過判定
+function updateTracks(dets){
+  const current = dets.map(d => {
+    const [x,y,w,h] = d.bbox;
+    return { bbox:[x,y,w,h], cx:x+w/2, cy:y+h/2, score:d.score };
+  });
+
+  // 既存トラックのミス回数を増加
+  tracks.forEach(t => t.missed++);
+
+  // 近傍割当
+  current.forEach(c => {
+    let bestId = null, bestDist = Infinity;
+    tracks.forEach((t,id) => {
+      const dx = t.cx - c.cx;
+      const dy = t.cy - c.cy;
+      const dist = Math.hypot(dx,dy);
+      if(dist < bestDist && dist <= ASSIGN_DIST){
+        bestDist = dist; bestId = id;
+      }
+    });
+    if(bestId){
+      const t = tracks.get(bestId);
+      t.lastCx = t.cx;
+      t.cx = c.cx; t.cy = c.cy; t.bbox = c.bbox; t.missed = 0;
+
+      // 基準線（画面幅に対する%）
+      const W = els.canvas.width;
+      const lineXpx = W * (cfg.lineX/100);
+
+      // 直近の位置がどちら側か
+      const prevSide = t.lastSide ?? (t.lastCx < lineXpx ? 'left' : 'right');
+      const nowSide  = t.cx < lineXpx ? 'left' : 'right';
+
+      // 線を跨いだ＆未カウントなら方向判定
+      if(!t.counted && prevSide !== nowSide){
+        const dx = t.cx - t.lastCx;
+        // 左 -> 右 なら「右から来た」
+        if(prevSide === 'left' && nowSide === 'right' && dx > 0){
+          countRight++; t.counted = true;
+        }
+        // 右 -> 左 なら「左から来た」
+        else if(prevSide === 'right' && nowSide === 'left' && dx < 0){
+          countLeft++; t.counted = true;
+        }
+        updateCountersUI();
+      }
+      t.lastSide = nowSide;
+    }else{
+      // 新規トラック
+      const id = nextTrackId++;
+      const W = els.canvas.width;
+      const lineXpx = W * (cfg.lineX/100);
+      tracks.set(id, {
+        cx:c.cx, cy:c.cy, lastCx:c.cx,
+        lastSide: c.cx < lineXpx ? 'left':'right',
+        bbox:c.bbox, counted:false, missed:0
+      });
+    }
+  });
+
+  // 長期未検出トラックの削除
+  [...tracks.entries()].forEach(([id,t]) => {
+    if(t.missed > MAX_MISSED){ tracks.delete(id); }
+  });
+}
+
+// オーバーレイ描画
+function drawOverlay(ctx){
+  const W = els.canvas.width, H = els.canvas.height;
+
+  // 背景に現在のフレームを描く
+  ctx.drawImage(els.video, 0, 0, W, H);
+
+  // 基準線
+  const lineXpx = Math.floor(W * (cfg.lineX/100));
+  ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(lineXpx, 0); ctx.lineTo(lineXpx, H); ctx.stroke();
+
+  // トラック矩形
+  tracks.forEach(t => {
+    const [x,y,w,h] = t.bbox;
+    ctx.strokeStyle = t.counted ? '#06d6a0' : '#118ab2';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(x,y,w,h);
+    ctx.fillStyle = 'rgba(17,138,178,0.25)';
+    ctx.fillRect(x,y,w,h);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '12px system-ui';
+    ctx.fillText(t.counted ? 'counted' : 'tracking', x+4, y+14);
+
+    // 重心点
+    ctx.fillStyle = '#ef476f';
+    ctx.beginPath(); ctx.arc(t.cx, t.cy, 4, 0, Math.PI*2); ctx.fill();
+  });
+
+  // 角に統計表示
+  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(8,8,180,70);
+  ctx.fillStyle = '#d1f7ff'; ctx.font='14px system-ui';
+  ctx.fillText(`右から: ${countRight}`, 16, 30);
+  ctx.fillStyle = '#ffe0e6';
+  ctx.fillText(`左から: ${countLeft}`, 16, 50);
+  ctx.fillStyle = '#e7f9e7';
+  ctx.fillText(`合計: ${countRight+countLeft}`, 16, 70);
+}
+
+// 1分集計（差分）
+function startMinuteAggregation(){
+  minuteStart = new Date();
+  lastSnapshot = { right:countRight, left:countLeft };
+  if(minuteTimer) clearInterval(minuteTimer);
+  minuteTimer = setInterval(() => {
+    const now = new Date();
+    const diffRight = countRight - lastSnapshot.right;
+    const diffLeft  = countLeft  - lastSnapshot.left;
+    const total = diffRight + diffLeft;
+
+    addAggRow(minuteStart, diffRight, diffLeft, total);
+
+    // 次の分へ
+    minuteStart = now;
+    lastSnapshot = { right:countRight, left:countLeft };
+  }, 60_000); // 1分
+}
+
+function addAggRow(ts, right, left, total){
+  const tr = document.createElement('tr');
+  const fmt = (d) => d.toLocaleString('ja-JP', { hour12:false });
+  tr.innerHTML = `
+    <td style="text-align:left">${fmt(ts)}</td>
+    <td>${right}</td>
+    <td>${left}</td>
+    <td>${total}</td>
+  `;
+  els.tableAggBody.appendChild(tr);
+  minuteRows.push({ ts, right, left, total });
+}
+
+// UIのカウンタ更新
+function updateCountersUI(){
+  els.countRight.textContent = countRight;
+  els.countLeft.textContent  = countLeft;
+  els.countTotal.textContent = countRight + countLeft;
+}
+
+// リセット
+function resetAll(){
+  countRight = 0; countLeft = 0; updateCountersUI();
+  tracks.clear(); nextTrackId = 1;
+  // 集計テーブルをクリア
+  els.tableAggBody.innerHTML = '';
+  minuteRows.length = 0;
+  // 分集計を再スタート
+  if(running){
+    startMinuteAggregation();
+  }
+}
+
+// 停止＆後始末
+async function stopAll(){
+ teTimer){ clearInterval(minuteTimer); minuteTimer = null; }
+  if(stream){
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+  els.btnStart.disabled = false; els.btnStart.textContent = 'カメラ開始';
+  els.btnPause.disabled = true;  els.btnPause.textContent = '一時停止';
+  els.btnReset.disabled = true;
+  els.btnStopExport.disabled = true;
+}
+
+// Excel出力（SheetJS）
+function exportExcel(){
+  // 分集計が未追加の分も、現在の分まで締める
+  if(minuteStart){
+    const diffRight = countRight - lastSnapshot.right;
+    const diffLeft  = countLeft  - lastSnapshot.left;
+    const total = diffRight + diffLeft;
+    if(diffRight !== 0 || diffLeft !== 0 || minuteRows.length === 0){
+      addAggRow(minuteStart, diffRight, diffLeft, total);
+    }
+  }
+
+  const rows = minuteRows.map(r => ({
+    '分開始時刻': r.ts.toLocaleString('ja-JP', { hour12:false }),
+    '右から': r.right,
+    '左から': r.left,
+    '合計': r.total
+  }));
+
+  // 総計行
+  const sumRight = rows.reduce((a,b)=>a+b['右から'],0);
+  const sumLeft  = rows.reduce((a,b)=>a+b['左から'],0);
+  const sumTotal = rows.reduce((a,b)=>a+b['合計'],0);
+  rows.push({'分開始時刻':'総計','右から':sumRight,'左から':sumLeft,'合計':sumTotal});
+
+  // ワークブック生成
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows, { origin:0 });
+  XLSX.utils.book_append_sheet(wb, ws, '集計(1分毎)');
+
+  // 設定シート
+  const cfgRows = [
+    { 項目:'検出感度(スコア)', 値: cfg.scoreThr },
+    { 項目:'最小サイズ(画面比)', 値: cfg.minRatio },
+    { 項目:'基準線(%)', 値: cfg.lineX },
+    { 項目:'右から(総計)', 値: sumRight },
+    { 項目:'左から(総計)', 値: sumLeft },
+    { 項目:'合計(総計)', 値: sumTotal },
+    { 項目:'出力日時', 値: new Date().toLocaleString('ja-JP', { hour12:false }) }
+  ];
+  const wsCfg = XLSX.utils.json_to_sheet(cfgRows, { origin:0 });
+  XLSX.utils.book_append_sheet(wb, wsCfg, '設定&ノート');
+
+  const filename = `人物通過_1分集計_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.xlsx`;
+  XLSX.writeFile(wb, filename);
+}
+
+</script>
+
+</body>
+</html>
