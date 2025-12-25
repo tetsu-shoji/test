@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="ja">
 <head>
@@ -99,9 +100,9 @@
 </main>
 
 <!-- 依存ライブラリ（CDN） -->
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js</script>
+https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js</script>
+https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js</script>
 
 <script>
 /**
@@ -437,7 +438,9 @@ function resetAll(){
 
 // 停止＆後始末
 async function stopAll(){
- teTimer){ clearInterval(minuteTimer); minuteTimer = null; }
+  running = false;
+  paused = false;
+  if(minuteTimer){ clearInterval(minuteTimer); minuteTimer = null; }
   if(stream){
     stream.getTracks().forEach(t => t.stop());
     stream = null;
