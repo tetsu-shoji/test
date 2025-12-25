@@ -99,10 +99,10 @@
   </aside>
 </main>
 
-<!-- 依存ライブラリ（CDN） -->
-https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js</script>
-https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js</script>
-https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js</script>
+<!-- ✅ 正しいライブラリ読み込み -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
 <script>
 /**
@@ -152,7 +152,7 @@ const minuteRows = []; // [{ts, right, left, total}]
 let tracks = new Map(); // id -> {cx, cy, lastCx, lastSide, counted:boolean, missed:number, bbox:[x,y,w,h]}
 let nextTrackId = 1;
 const MAX_MISSED = 8;        // 見失い許容フレーム
-const ASSIGN_DIST = 80;      // 割当半径(px) 映像解像度に応じて調整
+const ASSIGN_DIST = 80;      // 割当半径(px)
 
 // 設定（UI連動）
 const cfg = {
@@ -222,7 +222,6 @@ els.btnStopExport.addEventListener('click', async () => {
 
 // カメラ初期化
 async function initCamera(){
-  // スマホは背面カメラ優先
   const constraints = {
     audio:false,
     video:{
@@ -235,11 +234,10 @@ async function initCamera(){
   els.video.srcObject = stream;
   await els.video.play();
 
-  // キャンバスサイズを映像に合わせる
+  // キャンバス
   const {videoWidth:w, videoHeight:h} = els.video;
-  const scale = 1.0; // 必要なら 0.75 などに変更
-  els.canvas.width  = Math.floor(w * scale);
-  els.canvas.height = Math.floor(h * scale);
+  els.canvas.width  = w;
+  els.canvas.height = h;
 }
 
 // モデルロード
@@ -257,20 +255,16 @@ function startLoop(){
 
     // 推論
     const preds = await model.detect(els.video);
-    // 映像サイズ
     const W = els.canvas.width, H = els.canvas.height;
 
-    // personのみ抽出＆スコア/サイズ閾
+    // personのみ抽出
     const people = preds.filter(p => p.class === 'person' && p.score >= cfg.scoreThr)
                         .filter(p => {
                           const [x,y,w,h] = p.bbox;
                           return (w*h) >= cfg.minRatio * (W*H);
                         });
 
-    // トラック更新
     updateTracks(people);
-
-    // 描画
     drawOverlay(ctx);
   };
   running = true;
@@ -284,10 +278,8 @@ function updateTracks(dets){
     return { bbox:[x,y,w,h], cx:x+w/2, cy:y+h/2, score:d.score };
   });
 
-  // 既存トラックのミス回数を増加
   tracks.forEach(t => t.missed++);
 
-  // 近傍割当
   current.forEach(c => {
     let bestId = null, bestDist = Infinity;
     tracks.forEach((t,id) => {
@@ -303,30 +295,22 @@ function updateTracks(dets){
       t.lastCx = t.cx;
       t.cx = c.cx; t.cy = c.cy; t.bbox = c.bbox; t.missed = 0;
 
-      // 基準線（画面幅に対する%）
       const W = els.canvas.width;
       const lineXpx = W * (cfg.lineX/100);
-
-      // 直近の位置がどちら側か
       const prevSide = t.lastSide ?? (t.lastCx < lineXpx ? 'left' : 'right');
       const nowSide  = t.cx < lineXpx ? 'left' : 'right';
 
-      // 線を跨いだ＆未カウントなら方向判定
       if(!t.counted && prevSide !== nowSide){
         const dx = t.cx - t.lastCx;
-        // 左 -> 右 なら「右から来た」
         if(prevSide === 'left' && nowSide === 'right' && dx > 0){
           countRight++; t.counted = true;
-        }
-        // 右 -> 左 なら「左から来た」
-        else if(prevSide === 'right' && nowSide === 'left' && dx < 0){
+        } else if(prevSide === 'right' && nowSide === 'left' && dx < 0){
           countLeft++; t.counted = true;
         }
         updateCountersUI();
       }
       t.lastSide = nowSide;
     }else{
-      // 新規トラック
       const id = nextTrackId++;
       const W = els.canvas.width;
       const lineXpx = W * (cfg.lineX/100);
@@ -338,7 +322,6 @@ function updateTracks(dets){
     }
   });
 
-  // 長期未検出トラックの削除
   [...tracks.entries()].forEach(([id,t]) => {
     if(t.missed > MAX_MISSED){ tracks.delete(id); }
   });
@@ -347,16 +330,12 @@ function updateTracks(dets){
 // オーバーレイ描画
 function drawOverlay(ctx){
   const W = els.canvas.width, H = els.canvas.height;
-
-  // 背景に現在のフレームを描く
   ctx.drawImage(els.video, 0, 0, W, H);
 
-  // 基準線
   const lineXpx = Math.floor(W * (cfg.lineX/100));
   ctx.strokeStyle = '#ffd166'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(lineXpx, 0); ctx.lineTo(lineXpx, H); ctx.stroke();
 
-  // トラック矩形
   tracks.forEach(t => {
     const [x,y,w,h] = t.bbox;
     ctx.strokeStyle = t.counted ? '#06d6a0' : '#118ab2';
@@ -369,12 +348,10 @@ function drawOverlay(ctx){
     ctx.font = '12px system-ui';
     ctx.fillText(t.counted ? 'counted' : 'tracking', x+4, y+14);
 
-    // 重心点
     ctx.fillStyle = '#ef476f';
     ctx.beginPath(); ctx.arc(t.cx, t.cy, 4, 0, Math.PI*2); ctx.fill();
   });
 
-  // 角に統計表示
   ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(8,8,180,70);
   ctx.fillStyle = '#d1f7ff'; ctx.font='14px system-ui';
   ctx.fillText(`右から: ${countRight}`, 16, 30);
@@ -384,7 +361,7 @@ function drawOverlay(ctx){
   ctx.fillText(`合計: ${countRight+countLeft}`, 16, 70);
 }
 
-// 1分集計（差分）
+// 1分集計
 function startMinuteAggregation(){
   minuteStart = new Date();
   lastSnapshot = { right:countRight, left:countLeft };
@@ -394,13 +371,10 @@ function startMinuteAggregation(){
     const diffRight = countRight - lastSnapshot.right;
     const diffLeft  = countLeft  - lastSnapshot.left;
     const total = diffRight + diffLeft;
-
     addAggRow(minuteStart, diffRight, diffLeft, total);
-
-    // 次の分へ
     minuteStart = now;
     lastSnapshot = { right:countRight, left:countLeft };
-  }, 60_000); // 1分
+  }, 60_000);
 }
 
 function addAggRow(ts, right, left, total){
@@ -416,44 +390,33 @@ function addAggRow(ts, right, left, total){
   minuteRows.push({ ts, right, left, total });
 }
 
-// UIのカウンタ更新
 function updateCountersUI(){
   els.countRight.textContent = countRight;
   els.countLeft.textContent  = countLeft;
   els.countTotal.textContent = countRight + countLeft;
 }
 
-// リセット
 function resetAll(){
   countRight = 0; countLeft = 0; updateCountersUI();
   tracks.clear(); nextTrackId = 1;
-  // 集計テーブルをクリア
   els.tableAggBody.innerHTML = '';
   minuteRows.length = 0;
-  // 分集計を再スタート
-  if(running){
-    startMinuteAggregation();
-  }
+  if(running){ startMinuteAggregation(); }
 }
 
-// 停止＆後始末
 async function stopAll(){
   running = false;
   paused = false;
   if(minuteTimer){ clearInterval(minuteTimer); minuteTimer = null; }
-  if(stream){
-    stream.getTracks().forEach(t => t.stop());
-    stream = null;
-  }
+  if(stream){ stream.getTracks().forEach(t => t.stop()); stream = null; }
   els.btnStart.disabled = false; els.btnStart.textContent = 'カメラ開始';
   els.btnPause.disabled = true;  els.btnPause.textContent = '一時停止';
   els.btnReset.disabled = true;
   els.btnStopExport.disabled = true;
 }
 
-// Excel出力（SheetJS）
+// Excel出力
 function exportExcel(){
-  // 分集計が未追加の分も、現在の分まで締める
   if(minuteStart){
     const diffRight = countRight - lastSnapshot.right;
     const diffLeft  = countLeft  - lastSnapshot.left;
@@ -470,18 +433,15 @@ function exportExcel(){
     '合計': r.total
   }));
 
-  // 総計行
   const sumRight = rows.reduce((a,b)=>a+b['右から'],0);
   const sumLeft  = rows.reduce((a,b)=>a+b['左から'],0);
   const sumTotal = rows.reduce((a,b)=>a+b['合計'],0);
   rows.push({'分開始時刻':'総計','右から':sumRight,'左から':sumLeft,'合計':sumTotal});
 
-  // ワークブック生成
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(rows, { origin:0 });
   XLSX.utils.book_append_sheet(wb, ws, '集計(1分毎)');
 
-  // 設定シート
   const cfgRows = [
     { 項目:'検出感度(スコア)', 値: cfg.scoreThr },
     { 項目:'最小サイズ(画面比)', 値: cfg.minRatio },
@@ -499,6 +459,6 @@ function exportExcel(){
 }
 
 </script>
-
 </body>
 </html>
+``
