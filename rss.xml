@@ -1,0 +1,19 @@
+
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>イベント情報RSS（サンプル）</title>
+    <link>https://example.com/</link>
+    <description>地域イベントの新着情報を配信するデモRSSです。</description>
+    <lastBuildDate>Mon, 19 Jan 2026 09:55:00 GMT</lastBuildDate>
+
+    <item>
+      <title>潮見高架下ひろば オープニングマルシェ</title>
+      <link>https://example.com/events/shiomi-opening.html</link>
+      <guid isPermaLink="true">https://example.com/events/shiomi-opening</guid>
+      <description><![CDATA[地域の飲食・物販・ワークショップが集まる屋外マルシェ。ステージ企画も予定。（開催日：2026-02-22 10:00 – 16:00／会場：潮見高架下ひろば（仮））]]></description>
+      <pubDate>Mon, 19 Jan 2026 00:00:00 GMT</pubDate>
+    </item>
+    <!-- 以降、他2件も同様 -->
+  </channel>
+</rss>
