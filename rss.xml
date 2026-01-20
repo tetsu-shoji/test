@@ -11,12 +11,12 @@
 
     <!-- ★ ここから新しく追加した item（いちばん上） -->
     <item>
-      <title>春の地域フェスタ</title>
+      <title>春の地域フェスタ２</title>
       <link>https://tetsu-shoji.github.io/test/events/spring-festa.html</link>
       <guid isPermaLink="true">https://tetsu-shoji.github.io/test/events/spring-festa.html</guid>
       <description><![CDATA[
         地元団体によるステージと飲食ブースが並ぶ春のイベントです。
-        （開催日：2026-04-12 10:00 – 15:00／会場：中央公園）
+        （開催日：2026-04-3 10:00 – 15:00／会場：中央公園）
       ]]></description>
 
       <!-- ▼コミット直前の現在時刻（GMT）に置き換え推奨 -->
