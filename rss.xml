@@ -7,7 +7,7 @@
     <description>地域イベントの新着情報を配信するデモRSSです。</description>
 
     <!-- ▼コミット直前の現在時刻（GMT）に置き換え推奨 -->
-   <lastBuildDate>Tue, 20 Jan 2026 03:18:00 GMT</lastBuildDate>
+   <lastBuildDate>Tue, 20 Jan 2026 03:20:00 GMT</lastBuildDate>
 
     <!-- ★ ここから新しく追加した item（いちばん上） -->
     <item>
@@ -20,7 +20,7 @@
       ]]></description>
 
       <!-- ▼コミット直前の現在時刻（GMT）に置き換え推奨 -->
-      <pubDate>Mon, 19 Jan 2026 10:55:00 GMT</pubDate>
+      <pubDate>Tue, 20 Jan 2026 03:23:00 GMT</pubDate>
     </item>
     <!-- ★ ここまで新規 item -->
 
